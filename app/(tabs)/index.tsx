@@ -44,7 +44,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
 
   // ⚠️ ENSURE THIS IP MATCHES YOUR COMPUTER'S CURRENT IP
-const API_URL = 'http://172.23.179.96:5000/predict';
+const API_URL = 'https://rice-doctor-backend.onrender.com/predict';
 
   const handleImageResult = (result: ImagePicker.ImagePickerResult) => {
     if (!result.canceled) {
