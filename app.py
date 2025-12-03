@@ -11,7 +11,6 @@ app = Flask(__name__)
 CORS(app)
 
 MODEL_PATH = 'zambali_rice_efficientnet.h5' 
-
 LAST_CONV_LAYER_NAME = 'top_activation' 
 
 LABELS = [
@@ -24,16 +23,20 @@ LABELS = [
     'Sheath Blight'
 ]
 
-# --- LOAD MODEL ---
-print(f"🔄 Loading model from {MODEL_PATH}...")
-try:
-    model = tf.keras.models.load_model(MODEL_PATH)
-    print("✅ Model loaded!")
-except Exception as e:
-    print(f"❌ Failed to load model: {e}")
-    print("Check that the .h5 file is in the same folder as app.py")
+# --- 1. GLOBAL VARIABLE (Start as None) ---
+model = None
 
-# --- GRAD-CAM FUNCTIONS ---
+# --- 2. LAZY LOADING FUNCTION ---
+def get_model():
+    global model
+    if model is None:
+        print("⏳ Loading model for the first time...")
+        # This will only run when the first user scans a leaf
+        model = tf.keras.models.load_model(MODEL_PATH)
+        print("✅ Model loaded successfully!")
+    return model
+
+# --- 3. GRAD-CAM FUNCTIONS ---
 def get_gradcam_heatmap(img_array, model, last_conv_layer_name, pred_index=None):
     grad_model = tf.keras.models.Model(
         [model.inputs], [model.get_layer(last_conv_layer_name).output, model.output]
@@ -63,9 +66,13 @@ def generate_heatmap_image(img_array, heatmap, alpha=0.75):
     jet_heatmap = tf.keras.utils.img_to_array(jet_heatmap)
 
     superimposed_img = jet_heatmap * alpha + img_array * (1 - alpha)
-
     superimposed_img = tf.keras.utils.array_to_img(superimposed_img)
     return superimposed_img
+
+# --- 4. HEALTH CHECK ROUTE (Crucial for Render) ---
+@app.route('/', methods=['GET'])
+def home():
+    return "Rice Doctor API is Running! Send POST requests to /predict"
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -86,15 +93,21 @@ def predict():
     # 4. Prepare Batch
     img_batch = np.expand_dims(img_array, axis=0) 
 
-    # 5. Prediction
-    preds = model.predict(img_batch)
+    # --- 5. GET MODEL (Lazy Load) ---
+    # We call the function here. If it's the first time, it loads.
+    # If it's the second time, it's instant.
+    current_model = get_model()
+
+    # 6. Prediction
+    preds = current_model.predict(img_batch)
     pred_idx = np.argmax(preds[0])
     confidence = float(preds[0][pred_idx])
     label = LABELS[pred_idx]
 
-    # 6. Generate Grad-CAM
+    # 7. Generate Grad-CAM
     try:
-        heatmap = get_gradcam_heatmap(img_batch, model, LAST_CONV_LAYER_NAME, pred_idx)
+        # Pass 'current_model', not the global 'model'
+        heatmap = get_gradcam_heatmap(img_batch, current_model, LAST_CONV_LAYER_NAME, pred_idx)
         result_img = generate_heatmap_image(img_array, heatmap)
 
         buffered = io.BytesIO()
@@ -111,5 +124,4 @@ def predict():
     })
 
 if __name__ == '__main__':
-    # host='0.0.0.0' allows your phone to connect to your PC
     app.run(host='0.0.0.0', port=5000, debug=True)
